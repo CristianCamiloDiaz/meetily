@@ -3637,7 +3637,6 @@ dependencies = [
  "infer 0.15.0",
  "lazy_static",
  "log",
- "mac-notification-sys",
  "memory-stats",
  "ndarray",
  "nnnoiseless",

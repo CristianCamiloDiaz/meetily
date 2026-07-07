@@ -176,6 +176,20 @@ export class RecordingService {
       callback(event.payload);
     });
   }
+
+  /**
+   * Listen for meeting-detected event (Google Meet tab / Slack huddle found
+   * by the meeting detector)
+   * @param callback - Function to call with the detection info
+   * @returns Promise that resolves to unlisten function
+   */
+  async onMeetingDetected(
+    callback: (detection: { title: string; body: string }) => void
+  ): Promise<UnlistenFn> {
+    return listen<{ title: string; body: string }>('meeting-detected', (event) => {
+      callback(event.payload);
+    });
+  }
 }
 
 // Export singleton instance

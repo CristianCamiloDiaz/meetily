@@ -18,7 +18,6 @@ use crate::notifications::commands::NotificationManagerState;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 const SLACK_BUNDLE_ID: &str = "com.tinyspeck.slackmacgap";
-const MEETILY_BUNDLE_ID: &str = "com.meetily.ai";
 
 /// Browsers that expose tab URLs through the same AppleScript interface.
 const BROWSERS: &[&str] = &[
@@ -310,64 +309,22 @@ fn frontmost_bundle_id() -> Option<String> {
 
 fn notify_meeting(app: &AppHandle<Wry>, title: &str, body: &str) {
     log::info!("Meeting detector: {} — {}", title, body);
-    let app = app.clone();
-    let title = title.to_string();
-    let body = body.to_string();
 
-    // mac-notification-sys blocks while waiting for the user's response,
-    // so run it on its own thread.
-    std::thread::spawn(move || match send_actionable_notification(&title, &body) {
-        Ok(true) => {
-            log::info!("Meeting notification accepted — starting recording");
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.set_focus();
-            }
-            // Handled by the frontend layout listener, same path as the tray toggle
-            if let Err(e) = app.emit("request-recording-toggle", ()) {
-                log::error!("Meeting detector: failed to emit recording toggle: {}", e);
-            }
-        }
-        Ok(false) => {}
-        Err(e) => {
-            log::warn!(
-                "Actionable notification failed ({}), falling back to plain notification",
-                e
-            );
-            use tauri_plugin_notification::NotificationExt;
-            let _ = app
-                .notification()
-                .builder()
-                .title(&title)
-                .body(&body)
-                .show();
-        }
-    });
-}
+    // System notification through the same plugin path the rest of the app
+    // uses. (mac-notification-sys with an action button was tried here and
+    // crashed the app inside deprecated NSUserNotification XPC code.)
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(e) = app.notification().builder().title(title).body(body).show() {
+        log::warn!("Meeting detector: failed to show system notification: {}", e);
+    }
 
-/// Returns Ok(true) if the user clicked the notification or its action button.
-fn send_actionable_notification(title: &str, body: &str) -> anyhow::Result<bool> {
-    use mac_notification_sys::{MainButton, Notification, NotificationResponse};
-
-    static SET_APP: std::sync::Once = std::sync::Once::new();
-    SET_APP.call_once(|| {
-        // Attribute notifications to the Meetily bundle when it's registered
-        // (dev binaries fall back to the default attribution).
-        if let Err(e) = mac_notification_sys::set_application(MEETILY_BUNDLE_ID) {
-            log::debug!("Meeting detector: set_application failed: {}", e);
-        }
-    });
-
-    let response = Notification::default()
-        .title(title)
-        .message(body)
-        .main_button(MainButton::SingleAction("Start recording"))
-        .send()?;
-
-    Ok(matches!(
-        response,
-        NotificationResponse::ActionButton(_) | NotificationResponse::Click
-    ))
+    // In-app toast with a "Start recording" action, handled by the frontend
+    if let Err(e) = app.emit(
+        "meeting-detected",
+        serde_json::json!({ "title": title, "body": body }),
+    ) {
+        log::error!("Meeting detector: failed to emit meeting-detected: {}", e);
+    }
 }
 
 #[cfg(test)]

@@ -212,6 +212,22 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         });
         unsubscribers.push(unlistenDeviceOverride);
 
+        // Meeting detected (Google Meet tab / Slack huddle) — offer to start recording
+        const unlistenMeetingDetected = await recordingService.onMeetingDetected(({ title, body }) => {
+          console.log('[RecordingStateContext] Meeting detected:', title);
+          toast.info(title, {
+            description: body,
+            duration: 30000,
+            action: {
+              label: 'Start recording',
+              onClick: () => {
+                window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
+              },
+            },
+          });
+        });
+        unsubscribers.push(unlistenMeetingDetected);
+
         console.log('[RecordingStateContext] Event listeners set up successfully');
       } catch (error) {
         console.error('[RecordingStateContext] Failed to set up event listeners:', error);
