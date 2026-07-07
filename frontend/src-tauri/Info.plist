@@ -10,6 +10,8 @@
     <string>This application needs permission to capture system audio output for meeting transcription and recording.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Meetily checks your browser tabs for open Google Meet meetings so it can offer to start recording.</string>
+    <key>NSUserNotificationAlertStyle</key>
+    <string>alert</string>
     <key>com.apple.security.device.audio-input</key>
     <true/>
 </dict>
