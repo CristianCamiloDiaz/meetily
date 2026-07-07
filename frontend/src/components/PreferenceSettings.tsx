@@ -110,6 +110,28 @@ export function PreferenceSettings() {
     handleUpdateNotificationSettings();
   }, [notificationsEnabled, notificationSettings, isInitialLoad, previousNotificationsEnabled, updateNotificationSettings])
 
+  // Meeting detection toggle (Google Meet tabs / Slack huddles)
+  const meetingDetectionEnabled =
+    notificationSettings?.notification_preferences.meeting_detection_enabled ?? true;
+
+  const handleMeetingDetectionChange = async (checked: boolean) => {
+    if (!notificationSettings) return;
+    try {
+      await updateNotificationSettings({
+        ...notificationSettings,
+        notification_preferences: {
+          ...notificationSettings.notification_preferences,
+          meeting_detection_enabled: checked,
+        },
+      });
+      await Analytics.track('notification_settings_changed', {
+        meeting_detection_enabled: checked.toString()
+      });
+    } catch (error) {
+      console.error('Failed to update meeting detection setting:', error);
+    }
+  };
+
   const handleOpenFolder = async (folderType: 'database' | 'models' | 'recordings') => {
     try {
       switch (folderType) {
@@ -156,6 +178,19 @@ export function PreferenceSettings() {
             <p className="text-sm text-gray-600">Enable or disable notifications of start and end of meeting</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
+        </div>
+      </div>
+
+      {/* Meeting Detection Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Meeting Detection</h3>
+            <p className="text-sm text-gray-600">
+              Get notified when a Google Meet tab or a Slack huddle is detected, with a shortcut to start recording (macOS)
+            </p>
+          </div>
+          <Switch checked={meetingDetectionEnabled} onCheckedChange={handleMeetingDetectionChange} />
         </div>
       </div>
 

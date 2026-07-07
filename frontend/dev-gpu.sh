@@ -49,6 +49,22 @@ else
     exit 1
 fi
 
+# Pre-flight: stop stale dev processes from a previous run. A leftover
+# `next dev` on port 3118 or an old Meetily instance causes the window to
+# load a half-rendered page (blank main area, dead sidebar buttons).
+STALE_NEXT=$(lsof -ti tcp:3118 2>/dev/null || true)
+if [ -n "$STALE_NEXT" ]; then
+    echo -e "${YELLOW}⚠️  Port 3118 is in use by a previous dev server (PID $STALE_NEXT). Stopping it...${NC}"
+    kill $STALE_NEXT 2>/dev/null || true
+    sleep 1
+fi
+STALE_APP=$(pgrep -f "target/debug/meetily" 2>/dev/null || true)
+if [ -n "$STALE_APP" ]; then
+    echo -e "${YELLOW}⚠️  A previous Meetily dev instance is running (PID $STALE_APP). Stopping it...${NC}"
+    kill $STALE_APP 2>/dev/null || true
+    sleep 1
+fi
+
 echo ""
 echo -e "${BLUE}📦 Starting Meetily in development mode...${NC}"
 echo ""

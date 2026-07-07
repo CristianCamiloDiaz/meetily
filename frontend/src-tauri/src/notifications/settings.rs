@@ -60,6 +60,14 @@ pub struct NotificationPreferences {
 
     /// Minutes before meeting to show reminder (0 = disabled)
     pub meeting_reminder_minutes: Vec<u64>,
+
+    /// Detect active meetings (Google Meet tab / Slack huddle) and notify
+    #[serde(default = "default_meeting_detection_enabled")]
+    pub meeting_detection_enabled: bool,
+}
+
+fn default_meeting_detection_enabled() -> bool {
+    true
 }
 
 impl Default for NotificationSettings {
@@ -89,6 +97,7 @@ impl Default for NotificationPreferences {
             show_meeting_reminders: true,
             show_system_errors: true,
             meeting_reminder_minutes: vec![15, 5], // 15 minutes and 5 minutes before
+            meeting_detection_enabled: true,
         }
     }
 }

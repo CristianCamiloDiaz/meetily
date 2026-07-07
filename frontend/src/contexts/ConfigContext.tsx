@@ -39,6 +39,7 @@ export interface NotificationSettings {
     show_meeting_reminders: boolean;
     show_system_errors: boolean;
     meeting_reminder_minutes: number[];
+    meeting_detection_enabled: boolean;
   };
 }
 

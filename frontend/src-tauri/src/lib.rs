@@ -41,6 +41,8 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+#[cfg(target_os = "macos")]
+pub mod meeting_detector;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -450,6 +452,10 @@ pub fn run() {
                     }
                 }
             });
+
+            // Start meeting detection (Google Meet tabs / Slack huddles)
+            #[cfg(target_os = "macos")]
+            meeting_detector::start(_app.handle().clone());
 
             // Set models directory to use app_data_dir (unified storage location)
             whisper_engine::commands::set_models_directory(&_app.handle());
