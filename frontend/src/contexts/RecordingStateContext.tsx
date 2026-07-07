@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { recordingService } from '@/services/recordingService';
+import { toast } from 'sonner';
 
 /**
  * Recording state synchronized with backend
@@ -200,6 +201,16 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
           }));
         });
         unsubscribers.push(unlistenResumed);
+
+        // Device override warning (e.g. Bluetooth mic replaced to protect quality)
+        const unlistenDeviceOverride = await recordingService.onDeviceOverrideWarning((warning) => {
+          console.warn('[RecordingStateContext] Device override warning:', warning);
+          toast.warning('Microphone adjusted for recording quality', {
+            description: warning,
+            duration: 12000,
+          });
+        });
+        unsubscribers.push(unlistenDeviceOverride);
 
         console.log('[RecordingStateContext] Event listeners set up successfully');
       } catch (error) {

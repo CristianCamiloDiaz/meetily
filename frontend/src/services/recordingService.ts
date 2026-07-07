@@ -164,6 +164,18 @@ export class RecordingService {
   async onSpeechDetected(callback: () => void): Promise<UnlistenFn> {
     return listen('speech-detected', callback);
   }
+
+  /**
+   * Listen for device-override-warning event (e.g. Bluetooth mic replaced
+   * by the built-in microphone to protect recording quality)
+   * @param callback - Function to call with the warning message
+   * @returns Promise that resolves to unlisten function
+   */
+  async onDeviceOverrideWarning(callback: (warning: string) => void): Promise<UnlistenFn> {
+    return listen<string>('device-override-warning', (event) => {
+      callback(event.payload);
+    });
+  }
 }
 
 // Export singleton instance

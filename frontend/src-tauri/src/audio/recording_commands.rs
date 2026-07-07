@@ -369,6 +369,43 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         None
     };
 
+    // macOS: a Bluetooth microphone forces the headset into HFP (8-16 kHz telephone
+    // mode), which degrades playback and breaks the 48 kHz mixing pipeline. The
+    // defaults path already overrides to the built-in mic (see devices/fallback.rs);
+    // apply the same override here so explicitly selected devices get it too.
+    // System audio is left untouched: ScreenCaptureKit taps the digital stream
+    // before Bluetooth encoding, so it stays clean.
+    #[cfg(target_os = "macos")]
+    let mic_device = match mic_device {
+        Some(device)
+            if super::device_detection::InputDeviceKind::detect(&device.name, 512, 48000)
+                .is_bluetooth() =>
+        {
+            warn!("🎧 Bluetooth microphone '{}' requested for recording", device.name);
+            match super::devices::find_builtin_input_device() {
+                Ok(Some(builtin)) => {
+                    let msg = format!(
+                        "'{}' records at telephone quality over Bluetooth. Recording with '{}' instead — you can keep listening through your headphones.",
+                        device.name, builtin.name
+                    );
+                    warn!("→ ✅ Overriding to built-in microphone: {}", msg);
+                    let _ = app.emit("device-override-warning", msg);
+                    Some(Arc::new(builtin))
+                }
+                _ => {
+                    let msg = format!(
+                        "Recording with Bluetooth microphone '{}': audio quality will be degraded (telephone bandwidth).",
+                        device.name
+                    );
+                    warn!("→ ⚠️ No built-in microphone found. {}", msg);
+                    let _ = app.emit("device-override-warning", msg);
+                    Some(device)
+                }
+            }
+        }
+        other => other,
+    };
+
     // Async-first approach for custom devices - no more blocking operations!
     info!("🚀 Starting async recording initialization with custom devices");
 
