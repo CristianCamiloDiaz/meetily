@@ -384,6 +384,21 @@ async fn set_language_preference(language: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Button press from the floating meeting-alert overlay ("start" or "dismiss").
+/// Cross-platform wrapper: the detector itself only exists on macOS.
+#[tauri::command]
+async fn meeting_alert_action(app: tauri::AppHandle, action: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        return meeting_detector::handle_alert_action(app, action).await;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, action);
+        Ok(())
+    }
+}
+
 // Internal helper function to get language preference (for use within Rust code)
 pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
@@ -698,6 +713,8 @@ pub fn run() {
             audio::recording_preferences::get_audio_backend_info,
             // Language preference commands
             set_language_preference,
+            // Meeting detection overlay action (Start recording / Dismiss)
+            meeting_alert_action,
             // Notification system commands
             notifications::commands::get_notification_settings,
             notifications::commands::set_notification_settings,

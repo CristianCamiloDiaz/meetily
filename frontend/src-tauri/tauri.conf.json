@@ -10,6 +10,7 @@
         "beforeBuildCommand": "pnpm build"
     },
     "app": {
+        "withGlobalTauri": true,
         "windows": [
             {
                 "title": "meetily",
@@ -40,7 +41,8 @@
                     "identifier": "main",
                     "description": "Main window capability with file system and media access",
                     "windows": [
-                        "main"
+                        "main",
+                        "meeting-alert"
                     ],
                     "permissions": [
                         "fs:default",

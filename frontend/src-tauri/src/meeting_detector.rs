@@ -12,7 +12,7 @@
 use std::process::Command;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager, Wry};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Wry};
 
 use crate::notifications::commands::NotificationManagerState;
 
@@ -325,6 +325,108 @@ fn notify_meeting(app: &AppHandle<Wry>, title: &str, body: &str) {
     ) {
         log::error!("Meeting detector: failed to emit meeting-detected: {}", e);
     }
+
+    // Floating overlay window: not a system notification, so Focus/Do Not
+    // Disturb and per-app notification settings can't suppress it.
+    show_alert_overlay(app, title, body);
+}
+
+const ALERT_WINDOW_LABEL: &str = "meeting-alert";
+const ALERT_WIDTH: f64 = 480.0;
+const ALERT_HEIGHT: f64 = 88.0;
+
+fn show_alert_overlay(app: &AppHandle<Wry>, title: &str, body: &str) {
+    let app = app.clone();
+    let url = format!(
+        "meeting-alert.html?title={}&body={}",
+        percent_encode(title),
+        percent_encode(body)
+    );
+
+    // Window creation must happen on the main thread on macOS
+    let result = app.clone().run_on_main_thread(move || {
+        // Replace any previous overlay so the new one picks up fresh params
+        if let Some(existing) = app.get_webview_window(ALERT_WINDOW_LABEL) {
+            let _ = existing.close();
+        }
+
+        // Top-center of the primary screen
+        let (x, y) = match app.primary_monitor() {
+            Ok(Some(monitor)) => {
+                let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+                (((size.width - ALERT_WIDTH) / 2.0).max(0.0), 28.0)
+            }
+            _ => (400.0, 28.0),
+        };
+
+        let window = WebviewWindowBuilder::new(&app, ALERT_WINDOW_LABEL, WebviewUrl::App(url.into()))
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .resizable(false)
+            .inner_size(ALERT_WIDTH, ALERT_HEIGHT)
+            .position(x, y)
+            .build();
+
+        match window {
+            Ok(window) => {
+                // Also show over fullscreen apps (e.g. a fullscreen Meet):
+                // canJoinAllSpaces (1<<0) | fullScreenAuxiliary (1<<8)
+                if let Ok(ns_window) = window.ns_window() {
+                    unsafe {
+                        use objc::{msg_send, sel, sel_impl};
+                        let ns_window = ns_window as *mut objc::runtime::Object;
+                        let behavior: u64 = msg_send![ns_window, collectionBehavior];
+                        let _: () = msg_send![ns_window, setCollectionBehavior: behavior | (1u64 << 0) | (1u64 << 8)];
+                    }
+                }
+            }
+            Err(e) => log::error!("Meeting detector: failed to create alert overlay: {}", e),
+        }
+    });
+
+    if let Err(e) = result {
+        log::error!("Meeting detector: failed to dispatch overlay to main thread: {}", e);
+    }
+}
+
+/// Minimal percent-encoding for values embedded in the overlay URL query.
+fn percent_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() * 3);
+    for byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", byte)),
+        }
+    }
+    out
+}
+
+/// Handle a button press from the overlay window ("start" or "dismiss").
+pub async fn handle_alert_action(app: AppHandle<Wry>, action: String) -> Result<(), String> {
+    log::info!("Meeting alert action: {}", action);
+
+    if let Some(overlay) = app.get_webview_window(ALERT_WINDOW_LABEL) {
+        let _ = overlay.close();
+    }
+
+    if action == "start" {
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.show();
+            let _ = main.set_focus();
+        }
+        // Same path as the tray toggle: the layout listener forwards it
+        // to the recording start flow.
+        app.emit("request-recording-toggle", ())
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
