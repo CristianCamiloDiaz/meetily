@@ -148,6 +148,7 @@ pub struct LoudnessNormalizer {
     ebur128: ebur128::EbuR128,
     limiter: TruePeakLimiter,
     gain_linear: f32,
+    target_gain_linear: f32,
     loudness_buffer: Vec<f32>,
     true_peak_limit: f32,
 }
@@ -171,6 +172,7 @@ impl LoudnessNormalizer {
             ebur128,
             limiter: TruePeakLimiter::new(sample_rate),
             gain_linear: 1.0,
+            target_gain_linear: 1.0,
             loudness_buffer: Vec::with_capacity(ANALYZE_CHUNK_SIZE),
             true_peak_limit,
         })
@@ -190,6 +192,18 @@ impl LoudnessNormalizer {
 
         const TARGET_LUFS: f64 = -23.0;
         const ANALYZE_CHUNK_SIZE: usize = 512;
+        // Below this integrated loudness the mic is only picking up room tone /
+        // silence, not speech. Chasing -23 LUFS from there means +30..40 dB of
+        // gain, which turns the noise floor into a wall of noise until the
+        // first spoken words raise the measurement. Hold unity gain instead.
+        const NOISE_GATE_LUFS: f64 = -50.0;
+        // Bound the correction: lift quiet speech moderately rather than
+        // dragging the ambient noise up to broadcast level.
+        const MIN_GAIN_DB: f32 = -12.0;
+        const MAX_GAIN_DB: f32 = 12.0;
+        // One-pole smoothing toward the target gain (~40 ms at 48 kHz) so
+        // per-block gain updates never produce audible steps.
+        const GAIN_SMOOTHING: f32 = 0.0005;
 
         let mut normalized_samples = Vec::with_capacity(samples.len());
 
@@ -202,18 +216,24 @@ impl LoudnessNormalizer {
                 if let Err(e) = self.ebur128.add_frames_f32(&self.loudness_buffer) {
                     warn!("Failed to add frames to EBU R128: {}", e);
                 } else {
-                    // Update gain based on cumulative loudness
+                    // Update target gain based on cumulative loudness
                     if let Ok(current_lufs) = self.ebur128.loudness_global() {
                         if current_lufs.is_finite() && current_lufs < 0.0 {
-                            let gain_db = TARGET_LUFS - current_lufs;
-                            self.gain_linear = 10_f32.powf(gain_db as f32 / 20.0);
+                            if current_lufs > NOISE_GATE_LUFS {
+                                let gain_db = ((TARGET_LUFS - current_lufs) as f32)
+                                    .clamp(MIN_GAIN_DB, MAX_GAIN_DB);
+                                self.target_gain_linear = 10_f32.powf(gain_db / 20.0);
+                            } else {
+                                self.target_gain_linear = 1.0;
+                            }
                         }
                     }
                 }
                 self.loudness_buffer.clear();
             }
 
-            // Apply gain and true peak limiting
+            // Apply smoothed gain and true peak limiting
+            self.gain_linear += (self.target_gain_linear - self.gain_linear) * GAIN_SMOOTHING;
             let amplified = sample * self.gain_linear;
             let limited = self.limiter.process(amplified, self.true_peak_limit);
 
@@ -659,6 +679,73 @@ pub fn write_audio_to_file_with_meeting_name(
         )?;
     }
     Ok(file_path_clone)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_RATE: u32 = 48000;
+
+    /// Deterministic pseudo-noise in [-amplitude, amplitude] (LCG, no RNG dependency)
+    fn pseudo_noise(len: usize, amplitude: f32) -> Vec<f32> {
+        let mut state: u32 = 0x12345678;
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                let unit = (state >> 8) as f32 / (1u32 << 24) as f32; // [0, 1)
+                (unit * 2.0 - 1.0) * amplitude
+            })
+            .collect()
+    }
+
+    fn peak(samples: &[f32]) -> f32 {
+        samples.iter().fold(0.0f32, |max, &s| max.max(s.abs()))
+    }
+
+    #[test]
+    fn normalizer_holds_unity_gain_on_room_noise() {
+        // Room tone at ~-58 dBFS: integrated loudness sits far below the noise
+        // gate, so the normalizer must NOT boost it toward -23 LUFS.
+        let mut normalizer = LoudnessNormalizer::new(1, SAMPLE_RATE).unwrap();
+        let noise = pseudo_noise(SAMPLE_RATE as usize * 3, 0.002);
+        let output = normalizer.normalize_loudness(&noise);
+
+        let out_peak = peak(&output[SAMPLE_RATE as usize..]);
+        assert!(
+            out_peak <= 0.004,
+            "silence was amplified: output peak {} (input peak 0.002)",
+            out_peak
+        );
+    }
+
+    #[test]
+    fn normalizer_boosts_speech_within_bounds() {
+        // 1 kHz tone at ~-29 LUFS: above the gate, so it should be lifted
+        // toward -23 LUFS, but never beyond the +12 dB clamp.
+        let mut normalizer = LoudnessNormalizer::new(1, SAMPLE_RATE).unwrap();
+        let len = SAMPLE_RATE as usize * 3;
+        let tone: Vec<f32> = (0..len)
+            .map(|i| {
+                let t = i as f32 / SAMPLE_RATE as f32;
+                0.05 * (2.0 * std::f32::consts::PI * 1000.0 * t).sin()
+            })
+            .collect();
+        let output = normalizer.normalize_loudness(&tone);
+
+        // Measure after the smoothed gain has converged
+        let tail_peak = peak(&output[len - SAMPLE_RATE as usize..]);
+        assert!(
+            tail_peak > 0.065,
+            "speech-level audio was not boosted: tail peak {}",
+            tail_peak
+        );
+        assert!(
+            tail_peak <= 0.05 * 4.2,
+            "gain exceeded +12 dB clamp: tail peak {}",
+            tail_peak
+        );
+    }
 }
 
 /// Write transcript text to a file alongside the recording (legacy plain text format)
